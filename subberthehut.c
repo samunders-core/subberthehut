@@ -305,6 +305,50 @@ static void print_table(struct sub_info *sub_infos, int n, int align_release_nam
 	putchar('\n');
 }
 
+static const char *get_sub_path(const char *filepath, const char *sub_filename) {
+	char *sub_filepath;
+
+	if (same_name) {
+		const char *sub_ext = strrchr(sub_filename, '.');
+		if (!sub_ext) {
+			log_err("warning: subtitle filename from the OpenSubtitles.org "
+			        "database has no file extension, assuming .srt.");
+			sub_ext = ".srt";
+		}
+		const char *lastdot = strrchr(filepath, '.');
+		int index;
+		if (!lastdot)
+			index = strlen(filepath) - 1;
+		else
+			index = (lastdot - filepath);
+
+		sub_filepath = malloc(index + 1 + strlen(sub_ext) + 1);
+		if (!sub_filepath)
+			return NULL;
+
+		strncpy(sub_filepath, filepath, index);
+		sub_filepath[index] = '\0';
+		strcat(sub_filepath, sub_ext);
+	} else {
+		const char *lastslash = strrchr(filepath, '/');
+		if (!lastslash) {
+			sub_filepath = strdup(sub_filename);
+			if (!sub_filepath)
+				return NULL;
+		} else {
+			int index = (lastslash - filepath);
+			sub_filepath = malloc(index + 1 + strlen(sub_filename) + 1);
+			if (!sub_filepath)
+				return NULL;
+
+			strncpy(sub_filepath, filepath, index + 1);
+			sub_filepath[index + 1] = '\0';
+			strcat(sub_filepath, sub_filename);
+		}
+	}
+	return sub_filepath;
+}
+
 static int select_1_out_of(int n) {
 	_cleanup_free_ char *line = NULL;
 	size_t len = 0;
@@ -583,50 +627,6 @@ static void show_usage() {
 static void show_version() {
 	puts("subberthehut " VERSION "\n"
 	     "https://github.com/samunders-core/subberthehut/");
-}
-
-static const char *get_sub_path(const char *filepath, const char *sub_filename) {
-	char *sub_filepath;
-
-	if (same_name) {
-		const char *sub_ext = strrchr(sub_filename, '.');
-		if (!sub_ext) {
-			log_err("warning: subtitle filename from the OpenSubtitles.org "
-			        "database has no file extension, assuming .srt.");
-			sub_ext = ".srt";
-		}
-		const char *lastdot = strrchr(filepath, '.');
-		int index;
-		if (!lastdot)
-			index = strlen(filepath) - 1;
-		else
-			index = (lastdot - filepath);
-
-		sub_filepath = malloc(index + 1 + strlen(sub_ext) + 1);
-		if (!sub_filepath)
-			return NULL;
-
-		strncpy(sub_filepath, filepath, index);
-		sub_filepath[index] = '\0';
-		strcat(sub_filepath, sub_ext);
-	} else {
-		const char *lastslash = strrchr(filepath, '/');
-		if (!lastslash) {
-			sub_filepath = strdup(sub_filename);
-			if (!sub_filepath)
-				return NULL;
-		} else {
-			int index = (lastslash - filepath);
-			sub_filepath = malloc(index + 1 + strlen(sub_filename) + 1);
-			if (!sub_filepath)
-				return NULL;
-
-			strncpy(sub_filepath, filepath, index + 1);
-			sub_filepath[index + 1] = '\0';
-			strcat(sub_filepath, sub_filename);
-		}
-	}
-	return sub_filepath;
 }
 
 static int process_file(const char *filepath, const char *token) {
