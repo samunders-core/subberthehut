@@ -305,7 +305,25 @@ static void print_table(struct sub_info *sub_infos, int n, int align_release_nam
 	putchar('\n');
 }
 
-static int choose_from_results(xmlrpc_value *results, int n, int *sub_id, const char **sub_filename) {
+static int select_1_out_of(int n) {
+	_cleanup_free_ char *line = NULL;
+	size_t len = 0;
+	char *endptr = NULL;
+	int sel = 0;
+	do {
+		printf("Choose subtitle [1..%i], q/Q to quit: ", n);
+		fflush(stdout);
+		if (getline(&line, &len, stdin) == -1) {
+			return -EIO;
+		} else if (line && ('q' == line[0] || 'Q' == line[0])) {
+			return -1;
+		}
+		sel = strtol(line, &endptr, 10);
+	} while (*endptr != '\n' || sel < 1 || sel > n);
+	return sel;
+}
+
+static int download_chosen_results(const char *filepath, const char *token, xmlrpc_value *results, int n) {
 	int r = 0;
 	struct sub_info sub_infos[n];
 
@@ -345,33 +363,36 @@ static int choose_from_results(xmlrpc_value *results, int n, int *sub_id, const 
 	if (never_ask && sel == 0)
 		sel = 1;
 
-	if (sel == 0 || always_ask) {
+	while (sel == 0 || always_ask) {
+		print_table(sub_infos, n, align_release_name);
+		// let user choose the subtitle to download
+		sel = select_1_out_of(n);
+		if (sel <= 0) {
+			r = -sel;
+			goto finish;
+		}
+		_cleanup_free_ const char *sub_filepath = get_sub_path(filepath, sub_infos[sel - 1].filename);
+		if (!sub_filepath) {
+			r = log_oom();
+			goto finish;
+		}
+		log_info("downloading to %s ...", sub_filepath);
+		r = sub_download(token, sub_infos[sel - 1].id, sub_filepath);
+		if (r != 0 || n == 1)
+			goto finish;
+		sel = 0;
+	}
+
+	if (!quiet)
 		print_table(sub_infos, n, align_release_name);
 
-		_cleanup_free_ char *line = NULL;
-		size_t len = 0;
-		char *endptr = NULL;
-		do {
-			printf("Choose subtitle [1..%i]: ", n);
-			if (getline(&line, &len, stdin) == -1) {
-				r = EIO;
-				goto finish;
-			}
-
-			sel = strtol(line, &endptr, 10);
-		} while (*endptr != '\n' || sel < 1 || sel > n);
-	}
-	else if (!quiet) {
-		print_table(sub_infos, n, align_release_name);
-	}
-
-	*sub_id = sub_infos[sel - 1].id;
-	*sub_filename = strdup(sub_infos[sel - 1].filename);
-
-	if (!*sub_filename) {
+	_cleanup_free_ const char *sub_filepath = get_sub_path(filepath, sub_infos[sel - 1].filename);
+	if (!sub_filepath) {
 		r = log_oom();
 		goto finish;
 	}
+	log_info("downloading to %s ...", sub_filepath);
+	r = sub_download(token, sub_infos[sel - 1].id, sub_filepath);
 
 finish:
 	// __attribute__(cleanup) can't be used in structs, let alone arrays
@@ -561,7 +582,7 @@ static void show_usage() {
 
 static void show_version() {
 	puts("subberthehut " VERSION "\n"
-	     "https://github.com/mus65/subberthehut/");
+	     "https://github.com/samunders-core/subberthehut/");
 }
 
 static const char *get_sub_path(const char *filepath, const char *sub_filename) {
@@ -653,20 +674,7 @@ static int process_file(const char *filepath, const char *token) {
 		return 1;
 	}
 
-	// let user choose the subtitle to download
-	int sub_id = 0;
-	r = choose_from_results(results, results_length, &sub_id, &sub_filename);
-	if (r != 0)
-		return r;
-
-	sub_filepath = get_sub_path(filepath, sub_filename);
-	if (!sub_filepath)
-		return log_oom();
-
-	log_info("downloading to %s ...", sub_filepath);
-	r = sub_download(token, sub_id, sub_filepath);
-
-	return r;
+	return download_chosen_results(filepath, token, results, results_length);
 }
 
 static int list_sub_languages() {
