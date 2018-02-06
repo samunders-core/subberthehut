@@ -349,106 +349,6 @@ static const char *get_sub_path(const char *filepath, const char *sub_filename) 
 	return sub_filepath;
 }
 
-static int select_1_out_of(int n) {
-	_cleanup_free_ char *line = NULL;
-	size_t len = 0;
-	char *endptr = NULL;
-	int sel = 0;
-	do {
-		printf("Choose subtitle [1..%i], q/Q to quit: ", n);
-		fflush(stdout);
-		if (getline(&line, &len, stdin) == -1) {
-			return -EIO;
-		} else if (line && ('q' == line[0] || 'Q' == line[0])) {
-			return -1;
-		}
-		sel = strtol(line, &endptr, 10);
-	} while (*endptr != '\n' || sel < 1 || sel > n);
-	return sel;
-}
-
-static int download_chosen_results(const char *filepath, const char *token, xmlrpc_value *results, int n) {
-	int r = 0;
-	struct sub_info sub_infos[n];
-
-	int sel = 0; // selected list item
-
-	/* Make the values in the "Release / File Name" column
-	 * at least as long as the header title itself. */
-	int align_release_name = strlen(HEADER_RELEASE_NAME);
-
-	for (int i = 0; i < n; i++) {
-		_cleanup_xmlrpc_ xmlrpc_value *oneresult = NULL;
-		xmlrpc_array_read_item(&env, results, i, &oneresult);
-
-		// dear OpenSubtitles.org, why are these IDs provided as strings?
-		_cleanup_free_ const char *sub_id_str = struct_get_string(oneresult, "IDSubtitleFile");
-		_cleanup_free_ const char *matched_by_str = struct_get_string(oneresult, "MatchedBy");
-
-		sub_infos[i].id = strtol(sub_id_str, NULL, 10);
-		sub_infos[i].matched_by_hash = strcmp(matched_by_str, "moviehash") == 0;
-		sub_infos[i].lang = struct_get_string(oneresult, "SubLanguageID");
-		sub_infos[i].release_name = struct_get_string(oneresult, "MovieReleaseName");
-		sub_infos[i].filename = struct_get_string(oneresult, "SubFileName");
-
-		// select first hash match if one exists
-		if (sub_infos[i].matched_by_hash && sel == 0)
-			sel = i + 1;
-
-		int s = strlen(sub_infos[i].release_name);
-		if (s > align_release_name)
-			align_release_name = s;
-
-		s = strlen(sub_infos[i].filename);
-		if (s > align_release_name)
-			align_release_name = s;
-	}
-
-	if (never_ask && sel == 0)
-		sel = 1;
-
-	while (sel == 0 || always_ask) {
-		print_table(sub_infos, n, align_release_name);
-		// let user choose the subtitle to download
-		sel = select_1_out_of(n);
-		if (sel <= 0) {
-			r = -sel;
-			goto finish;
-		}
-		_cleanup_free_ const char *sub_filepath = get_sub_path(filepath, sub_infos[sel - 1].filename);
-		if (!sub_filepath) {
-			r = log_oom();
-			goto finish;
-		}
-		log_info("downloading to %s ...", sub_filepath);
-		r = sub_download(token, sub_infos[sel - 1].id, sub_filepath);
-		if (r != 0 || n == 1)
-			goto finish;
-		sel = 0;
-	}
-
-	if (!quiet)
-		print_table(sub_infos, n, align_release_name);
-
-	_cleanup_free_ const char *sub_filepath = get_sub_path(filepath, sub_infos[sel - 1].filename);
-	if (!sub_filepath) {
-		r = log_oom();
-		goto finish;
-	}
-	log_info("downloading to %s ...", sub_filepath);
-	r = sub_download(token, sub_infos[sel - 1].id, sub_filepath);
-
-finish:
-	// __attribute__(cleanup) can't be used in structs, let alone arrays
-	for (int i = 0; i < n; i++) {
-		free((void *)sub_infos[i].lang);
-		free((void *)sub_infos[i].release_name);
-		free((void *)sub_infos[i].filename);
-	}
-
-	return r;
-}
-
 static int sub_download(const char *token, int sub_id, const char *file_path) {
 	_cleanup_xmlrpc_ xmlrpc_value *sub_id_xmlval = NULL;
 	_cleanup_xmlrpc_ xmlrpc_value *query_array = NULL;
@@ -558,6 +458,106 @@ static int sub_download(const char *token, int sub_id, const char *file_path) {
 
 finish:
 	inflateEnd(&z_strm);
+
+	return r;
+}
+
+static int select_1_out_of(int n) {
+	_cleanup_free_ char *line = NULL;
+	size_t len = 0;
+	char *endptr = NULL;
+	int sel = 0;
+	do {
+		printf("Choose subtitle [1..%i], q/Q to quit: ", n);
+		fflush(stdout);
+		if (getline(&line, &len, stdin) == -1) {
+			return -EIO;
+		} else if (line && ('q' == line[0] || 'Q' == line[0])) {
+			return -1;
+		}
+		sel = strtol(line, &endptr, 10);
+	} while (*endptr != '\n' || sel < 1 || sel > n);
+	return sel;
+}
+
+static int download_chosen_results(const char *filepath, const char *token, xmlrpc_value *results, int n) {
+	int r = 0;
+	struct sub_info sub_infos[n];
+
+	int sel = 0; // selected list item
+
+	/* Make the values in the "Release / File Name" column
+	 * at least as long as the header title itself. */
+	int align_release_name = strlen(HEADER_RELEASE_NAME);
+
+	for (int i = 0; i < n; i++) {
+		_cleanup_xmlrpc_ xmlrpc_value *oneresult = NULL;
+		xmlrpc_array_read_item(&env, results, i, &oneresult);
+
+		// dear OpenSubtitles.org, why are these IDs provided as strings?
+		_cleanup_free_ const char *sub_id_str = struct_get_string(oneresult, "IDSubtitleFile");
+		_cleanup_free_ const char *matched_by_str = struct_get_string(oneresult, "MatchedBy");
+
+		sub_infos[i].id = strtol(sub_id_str, NULL, 10);
+		sub_infos[i].matched_by_hash = strcmp(matched_by_str, "moviehash") == 0;
+		sub_infos[i].lang = struct_get_string(oneresult, "SubLanguageID");
+		sub_infos[i].release_name = struct_get_string(oneresult, "MovieReleaseName");
+		sub_infos[i].filename = struct_get_string(oneresult, "SubFileName");
+
+		// select first hash match if one exists
+		if (sub_infos[i].matched_by_hash && sel == 0)
+			sel = i + 1;
+
+		int s = strlen(sub_infos[i].release_name);
+		if (s > align_release_name)
+			align_release_name = s;
+
+		s = strlen(sub_infos[i].filename);
+		if (s > align_release_name)
+			align_release_name = s;
+	}
+
+	if (never_ask && sel == 0)
+		sel = 1;
+
+	while (sel == 0 || always_ask) {
+		print_table(sub_infos, n, align_release_name);
+		// let user choose the subtitle to download
+		sel = select_1_out_of(n);
+		if (sel <= 0) {
+			r = -sel;
+			goto finish;
+		}
+		_cleanup_free_ const char *sub_filepath = get_sub_path(filepath, sub_infos[sel - 1].filename);
+		if (!sub_filepath) {
+			r = log_oom();
+			goto finish;
+		}
+		log_info("downloading to %s ...", sub_filepath);
+		r = sub_download(token, sub_infos[sel - 1].id, sub_filepath);
+		if (r != 0 || n == 1)
+			goto finish;
+		sel = 0;
+	}
+
+	if (!quiet)
+		print_table(sub_infos, n, align_release_name);
+
+	_cleanup_free_ const char *sub_filepath = get_sub_path(filepath, sub_infos[sel - 1].filename);
+	if (!sub_filepath) {
+		r = log_oom();
+		goto finish;
+	}
+	log_info("downloading to %s ...", sub_filepath);
+	r = sub_download(token, sub_infos[sel - 1].id, sub_filepath);
+
+finish:
+	// __attribute__(cleanup) can't be used in structs, let alone arrays
+	for (int i = 0; i < n; i++) {
+		free((void *)sub_infos[i].lang);
+		free((void *)sub_infos[i].release_name);
+		free((void *)sub_infos[i].filename);
+	}
 
 	return r;
 }
